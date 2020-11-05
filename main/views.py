@@ -1,5 +1,6 @@
 from json import *
 from random import *
+from math import *
 
 from django.shortcuts import render
 from django.http import HttpResponse
@@ -66,10 +67,13 @@ def get_result(request):
         player2 = Player.objects.get(nick=form['nick2'])
         game = MotionRecognition.objects.get(player1=player1, player2=player2)
         # json to dict
-        result1 = modify_values(loads(form['result1']))
-        result2 = modify_values(loads(form['result2']))
+        result1 = loads(form['result1'])
+        result2 = loads(form['result2'])
+        relocate_points(result1)
+        relocate_points(result2)
         # game 정보 업데이트
-        game.score += get_score(result1, result2)
+        round_score = get_score(result1, result2)
+        game.score += round_score
         game.round += 1
         game.save()
         # round 판단 후 점수 혹은 랭킹 return
@@ -85,27 +89,47 @@ def get_result(request):
                 rank.append(rank_dict)
             return HttpResponse(dumps(rank), content_type='application/json')
         else:
-            return HttpResponse(str(game.score))
+            return HttpResponse(str(round_score))
 
     return HttpResponse('no')
 
 
-def modify_values(result):
-    target = {}
-    nose_value_x = result['0']['x']
-    nose_value_y = result['0']['y']
-    target['nose'] = {}
-    target['nose']['x'] = target['nose']['y'] = 0
+def relocate_points(result):
+    # 서버로 들어오 result를 nose 값을 고정해서 nose 기준으로 재배치
+    dx = dy = 0
     for key, value in result:
-        part = value['part']
-        target[part] = {}
-        target[part]['x'] = value['x'] - nose_value_x
-        target[part]['y'] = value['y'] - nose_value_y
-    return target
+        if value['part'] != 'nose':
+            value['x'] = value['x'] * 100 + dx
+            value['y'] = value['y'] * 100 + dy
+        else:
+            dx = 50 - value['x'] * 100
+            dy = 20 - value['y'] * 100
+            value['x'] = 50
+            value['y'] = 20
 
 
 def get_score(result1, result2):
-    score = 0
+    distance = 0
+    for key, value in result1:
+        dx = result2[key]['x'] - value['x']
+        dy = result2[key]['y'] - value['y']
+        distance += sqrt(pow(dx, 2) + pow(dy, 2))
+
+    # distance 바탕으로 점수 산출
+    if distance < 170:
+        score = 100
+    elif distance < 340:
+        score = 90
+    elif distance < 510:
+        score = 80
+    elif distance < 680:
+        score = 70
+    elif distance < 850:
+        score = 60
+    elif distance < 1020:
+        score = 50
+    else:
+        score = 0
     return score
 
 
