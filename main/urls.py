@@ -11,5 +11,3 @@ urlpatterns = [
     path('score/', views.get_result),
     path('rank/', views.send_rank),
 ]
-
-print('url')

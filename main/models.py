@@ -16,3 +16,6 @@ class MotionRecognition(models.Model):
     round = models.IntegerField(default=0)
     channel_number = models.IntegerField(default=0)
     ready = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.round}: {self.player1}&{self.player2}"

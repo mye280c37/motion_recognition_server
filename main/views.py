@@ -16,7 +16,6 @@ def name(request):
 
 def find_partner(request, nickname, sig):
     # 사용자가 닉네임을 입력하고 들어왔을 때 동시 접속자에 안에서 파트너를 찾아 방 개설
-    print("hello")
     if request.method == "GET":
         print(request)
         # ToDo: nickname 겹치는 건 고려 안해도 되는가
@@ -52,6 +51,7 @@ def find_partner(request, nickname, sig):
 
 def get_two_ready(request):
     # 파트너 두 명의 레디 버튼을 받으면 키워드를 전송
+    #ToDo: CRSF Token
     if request.method == "POST":
         form = ReadyForm(request.POST)
         if form.is_valid():
@@ -60,6 +60,8 @@ def get_two_ready(request):
             if MotionRecognition.objects.filter(Q(nick1=nickname, channel_number=channel_number) | Q(nick2=nickname, channel_number=channel_number)).exists():
                 game = MotionRecognition.objects.get(Q(nick1=nickname, channel_number=channel_number) | Q(nick2=nickname, channel_number=channel_number)).ready
                 if game.ready == 2:
+                    game.ready = 0
+                    game.save()
                     return HttpResponse('keyword')
                 else:
                     game.ready += 1
@@ -68,6 +70,8 @@ def get_two_ready(request):
     return HttpResponse('no')
 
 
+# 두 명한테 각각 오나?
+# 한 게임 종료에 대해 두 request가 오면 하나는 동작을 처리하고 하나는 결과만 전송해야 함
 def get_result(request):
     # 앱으로부터 posenet 결과 값을 전송받아 비교 후 점수 전송 'keypoints' key의 array가 서버로 전송됨
     if request.method == 'POST':
@@ -86,7 +90,7 @@ def get_result(request):
         game.round += 1
         game.save()
         # round 판단 후 점수 혹은 랭킹 return
-        # TODO: rank view를 따로 만들어야 할지
+        # TODO: round_score 만 보내도록 수정
         if game.round == 7:
             # when game over, get total_score
             rank = []
@@ -118,6 +122,7 @@ def relocate_points(result):
 
 
 def get_score(result1, result2):
+    # 두 결과의 각 점의 L2Distance 구해서 총 거리 합을 바탕으로 점수 배정
     distance = 0
     for key, value in result1:
         dx = result2[key]['x'] - value['x']
@@ -142,7 +147,6 @@ def get_score(result1, result2):
     return score
 
 
-# 없앨 수도 있음
 def send_rank(request):
     # when game over, get total_score
     rank = []
@@ -165,7 +169,7 @@ def send_rank(request):
             }
         ]
     # ranking 정보 점수 내림차순 정렬
-    # all_rank_query = MotionRecognition.objects.all().order_by('score')
+    # all_rank_query = MotionRecognition.objects.filter(round=7).order_by('score')
     # for rank_query in all_rank_query:
     #     rank_dict = {'nickname1': rank_query.nick1, 'nickname2': rank_query.nick2, 'score': rank_query.score}
     #     rank.append(rank_dict)
