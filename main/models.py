@@ -5,6 +5,9 @@ class Player(models.Model):
     nick = models.CharField(max_length=10)
     have_partner = models.BooleanField(default=False)
 
+    def __str__(self):
+        return self.nick
+
 
 class MotionRecognition(models.Model):
     player1 = models.ForeignKey(Player, related_name='player1', on_delete=models.DO_NOTHING)

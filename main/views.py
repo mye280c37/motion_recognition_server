@@ -6,16 +6,21 @@ from django.shortcuts import render
 from django.http import HttpResponse
 from django.db.models import Q
 from .models import *
+from .forms import *
 
 
-def find_partner(request):
+def name(request):
+    print("ok")
+    return render(request, 'main.html')
+
+
+def find_partner(request, nickname, sig):
     # 사용자가 닉네임을 입력하고 들어왔을 때 동시 접속자에 안에서 파트너를 찾아 방 개설
-    if request.method == "POST":
-        form = request.POST
-        nickname = form['nickname']
-        sig = form['sig']
+    print("hello")
+    if request.method == "GET":
+        print(request)
         # ToDo: nickname 겹치는 건 고려 안해도 되는가
-        if sig == 'ok':
+        if sig == 1:
             if Player.objects.filter(nick='nickname').exists():
                 player1 = Player.objects.get(nick=nickname)
             else:
@@ -23,17 +28,18 @@ def find_partner(request):
             # partner가 없는 기존의  player 정보 가져오기
             player_query = Player.objects.filter(have_partner=False).exclude(nick=nickname)
             num_player = player_query.count()
+            print("num_player:", num_player)
             # 기존의 player 안에서 partner가 될 대상 랜덤하게 고르기
             if num_player > 0:
                 partner_index = randint(0, num_player - 1)
                 player2_pk = player_query[partner_index].pk
                 player2 = Player.objects.get(pk=player2_pk)
-                MotionRecognition.create(player1=player1, player2=player2)
                 player1.have_partner = True
                 player2.have_partner = True
                 channel_number = randint(1, 100)
                 player1.save()
                 player2.save()
+                MotionRecognition.objects.create(player1=player1, player2=player2, channel_number=channel_number)
                 return HttpResponse(channel_number)
             return HttpResponse("no")
         else:
@@ -47,14 +53,17 @@ def find_partner(request):
 def get_two_ready(request):
     # 파트너 두 명의 레디 버튼을 받으면 키워드를 전송
     if request.method == "POST":
-        form = request.POST
-        nickname = form['nickname']
-        if MotionRecognition.objects.filter(Q(nick1=nickname) | Q(nick2=nickname)).exists():
-            ready = MotionRecognition.objects.get(Q(nick1=nickname) | Q(nick2=nickname)).ready
-            if ready == 2:
-                return HttpResponse('keyword')
-            else:
-                ready += 1
+        form = ReadyForm(request.POST)
+        if form.is_valid():
+            nickname = form.cleaned_data['nickname']
+            channel_number = form.cleaned_data['channelNumber']
+            if MotionRecognition.objects.filter(Q(nick1=nickname, channel_number=channel_number) | Q(nick2=nickname, channel_number=channel_number)).exists():
+                game = MotionRecognition.objects.get(Q(nick1=nickname, channel_number=channel_number) | Q(nick2=nickname, channel_number=channel_number)).ready
+                if game.ready == 2:
+                    return HttpResponse('keyword')
+                else:
+                    game.ready += 1
+                    game.save()
 
     return HttpResponse('no')
 
@@ -137,9 +146,27 @@ def get_score(result1, result2):
 def send_rank(request):
     # when game over, get total_score
     rank = []
+    if request.method == "GET":
+        rank = [
+            {
+                'player1': 'Tom',
+                'player2': 'Peter',
+                'score': 690,
+            },
+            {
+                'player1': 'Tom',
+                'player2': 'James',
+                'score': 500
+            },
+            {
+                'player1': 'Lily',
+                'player2': 'Anne',
+                'score': 440
+            }
+        ]
     # ranking 정보 점수 내림차순 정렬
-    all_rank_query = MotionRecognition.objects.all().order_by('score')
-    for rank_query in all_rank_query:
-        rank_dict = {'nickname1': rank_query.nick1, 'nickname2': rank_query.nick2, 'score': rank_query.score}
-        rank.append(rank_dict)
+    # all_rank_query = MotionRecognition.objects.all().order_by('score')
+    # for rank_query in all_rank_query:
+    #     rank_dict = {'nickname1': rank_query.nick1, 'nickname2': rank_query.nick2, 'score': rank_query.score}
+    #     rank.append(rank_dict)
     return HttpResponse(dumps(rank), content_type='application/json')
