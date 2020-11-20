@@ -14,7 +14,9 @@ import os
 from pathlib import Path
 import socket
 
+print("=====socket info=====")
 print(socket.gethostbyname(socket.gethostname()))
+print(socket.gethostbyname(socket.getfqdn()))
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,6 +33,8 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
+# csrf token 해제
+CSRF_COOKIE_SECURE = True 
 
 # Application definition
 
@@ -126,6 +130,3 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/3.1/howto/static-files/
 
 STATIC_URL = '/static/'
-
-
-print("server run")
