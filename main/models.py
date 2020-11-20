@@ -2,12 +2,14 @@ from django.db import models
 
 
 class Player(models.Model):
-    nick = models.CharField(max_length=10)
-    deviceID = models.CharField(max_length=20)
+    nick = models.CharField(max_length=10, null=True)
+    deviceID = models.CharField(max_length=20, default="hello")
+    is_active = models.BooleanField(default=True)
     have_partner = models.BooleanField(default=False)
+    ready = models.IntegerField(default=0)
 
     def __str__(self):
-        return self.deviceID
+        return f"{self.deviceID}, nick: {self.nick}"
 
 
 class MotionRecognition(models.Model):
@@ -16,14 +18,14 @@ class MotionRecognition(models.Model):
     score = models.IntegerField(default=0)
     round = models.IntegerField(default=0)
     channel_number = models.IntegerField(default=0)
-    ready = models.IntegerField(default=0)
+    send_keyword = models.IntegerField(default=0)
 
     def __str__(self):
         return f"{self.round}: {self.player1}&{self.player2}"
 
 
 class Round(models.Model):
-    game = models.ForeignKey(MotionRecognition, on_delete=models.CASCADE)
+    game = models.ForeignKey(MotionRecognition, related_name="game", on_delete=models.CASCADE)
     round = models.IntegerField()
     result_number = models.IntegerField(default=0)
 
@@ -32,7 +34,7 @@ class Round(models.Model):
 
 
 class PoseEstimation(models.Model):
-    player = models.ForeignKey(MotionRecognition, on_delete=models.CASCADE)
+    player = models.ForeignKey(Player, on_delete=models.CASCADE)
     game = models.ForeignKey(MotionRecognition, on_delete=models.CASCADE)
     round = models.ForeignKey(Round, on_delete=models.CASCADE)
 

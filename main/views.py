@@ -25,6 +25,7 @@ def name(request):
     return render(request, 'main.html')
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 def find_partner(request):
     # 사용자가 닉네임을 입력하고 들어왔을 때 동시 접속자에 안에서 파트너를 찾아 방 개설
     if request.method == "POST":
@@ -32,32 +33,62 @@ def find_partner(request):
         nickname = form['nickname']
         deviceID = form['deviceID']
         print(request)
-        # ToDo: nickname 겹치는 건 고려 안해도 되는가
-        if Player.objects.filter(deviceID=deviceID, nick=nickname).exists():
-            player1 = Player.objects.get(deviceID=deviceID, nick=nickname)
+        # Player 정보 확인
+        if Player.objects.filter(deviceID=deviceID):
+            player1 = Player.objects.get(deviceID=deviceID)
+            player1.nick = nickname
+            player1.is_active = True
         else:
             player1 = Player.objects.create(deviceID=deviceID, nick=nickname)
-        # partner가 없는 기존의  player 정보 가져오기
-        player_query = Player.objects.filter(have_partner=False).exclude(deviceID=deviceID)
-        num_player = player_query.count()
-        print("num_player:", num_player)
-        # 기존의 player 안에서 partner가 될 대상 랜덤하게 고르기
-        if num_player > 0:
-            partner_index = randint(0, num_player - 1)
-            player2_pk = player_query[partner_index].pk
-            player2 = Player.objects.get(pk=player2_pk)
-            player1.have_partner = True
-            player2.have_partner = True
-            channel_number = randint(1, 100)
-            player1.save()
-            player2.save()
-            MotionRecognition.objects.create(player1=player1, player2=player2, channel_number=channel_number)
-            return HttpResponse(channel_number)
-        else:
-            # 더이상 접속하지 않고 게임을 나감
-            Player.objects.get(deviceID=deviceID).delete()
-            return HttpResponse('exit')
+        print(type(player1))
+        # partner 찾을 때까지 return 하지 않고 기다리기
+        while True:
+            player1 = Player.objects.get(deviceID=deviceID)
+            print("in while")
+            if player1.have_partner:
+                game = MotionRecognition.objects.get(player2=player1)
+                return HttpResponse(game.channel_number)
+            else:
+                # partner가 없는 기존의  player 정보 가져오기
+                player_query = Player.objects.filter(is_active=True, have_partner=False).exclude(deviceID=deviceID)
+                num_player = player_query.count()
+                print("num_player:", num_player)
+                # 기존의 player 안에서 partner가 될 대상 랜덤하게 고르기
+                if num_player > 0:
+                    partner_index = randint(0, num_player - 1)
+                    player2_pk = player_query[partner_index].pk
+                    player2 = Player.objects.get(pk=player2_pk)
+                    player1.have_partner = True
+                    player2.have_partner = True
+                    channel_number = randint(1, 100)
+                    player1.save()
+                    player2.save()
+                    MotionRecognition.objects.create(player1=player1, player2=player2, channel_number=channel_number)
+                    return HttpResponse(channel_number)
 
+    # 더이상 접속하지 않고 게임을 나감
+    return HttpResponse('no')
+
+
+def get_total_ready(game):
+    ready1 = game.player1.ready
+    ready2 = game.player2.ready
+    total_ready = 0
+    if ready1 >= 1:
+        total_ready += 1
+    if ready2 >= 1:
+        total_ready += 1
+
+    return total_ready
+
+
+def reset_ready(game):
+    player1 = game.player1
+    player2 = game.player2
+    player1.ready = 0
+    player1.save()
+    player2.ready = 0
+    player2.save()
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -65,20 +96,37 @@ def get_two_ready(request):
     # 파트너 두 명의 레디 버튼을 받으면 키워드를 전송
     #ToDo: CRSF Token
     if request.method == "POST":
-        form = ReadyForm(request.POST)
-        if form.is_valid():
-            nickname = form.cleaned_data['nickname']
-            player = Player.objects.get(nick=nickname)
-            channel_number = form.cleaned_data['channelNumber']
+        form = request.POST
+        deviceID = form['deviceID']
+        channel_number = form['channelNumber']
+        if Player.objects.filter(deviceID=deviceID).exists():
+            print("find player")
+            player = Player.objects.get(deviceID=deviceID)
+            # Player의 게임에 대한 ready update
+            player.ready += 1
+            print("update ready")
+            player.save()
+            # 상대방도 ready를 했는지 확인
             if MotionRecognition.objects.filter(channel_number=channel_number).exists():
+                print("find game")
                 game = MotionRecognition.objects.get(channel_number=channel_number)
-                if game.ready == 2:
-                    game.ready = 0
+                total_ready = get_total_ready(game)
+                print(total_ready)
+                if total_ready == 2:
+                    game.send_keyword += 1
                     game.save()
+                    # 다음 라운드를 위해 ready reset
+                    if game.send_keyword == 2:
+                        print("second send keyword")
+                        reset_ready(game)
+                        game.send_keyword = 0
+                        game.save()
                     return HttpResponse('keyword')
                 else:
-                    game.ready += 1
-                    game.save()
+                    return HttpResponse('no')
+            else:
+                print("there is no game")
+                return HttpResponse("no")
 
     return HttpResponse('no')
 
