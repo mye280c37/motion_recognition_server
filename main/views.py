@@ -1,3 +1,4 @@
+from datetime import *
 from json import *
 from random import *
 from math import *
@@ -20,6 +21,8 @@ from django.utils.decorators import method_decorator
 
 # ready가 안 들어온다는 신호 보내줘야 함, 상대방이 ready 안 보내면 no 보내는데 이 보내는 걸 카운트해서 일정 횟수 이상 되면 상대방이 나갔다고 판단
 
+KEYWORD = ["soccer", "basketball", "football", "basketball", "table tennis", "bowling", "billiards", "tennis", "hockey", "badminton", "rugby", "softball", "gymnastics", "swimming", "diving", "yacht", "surf", "marathon", "sprint", "throw", "cycling", "ski", "snowboard", "skate", "horseback riding", "Judo", "Taekwondo", "boxing", "fencing", "shooting", "Archery", "lion", "giraffe", "bear", "pandas", "otter", "fur seal", "monkey", "cow", "dog", "cat", "octopus", "Tyrannosaurus rex", "pterosaurs", "Spider Man", "Captin America", "Iron Man", "Thor", "Hulk", "Nick Fury"]
+
 def name(request):
     print("ok")
     return render(request, 'main.html')
@@ -27,34 +30,39 @@ def name(request):
 
 @method_decorator(csrf_exempt, name='dispatch')
 def find_partner(request):
+    game_info = {"title": "no",
+                 "channel_number": 0}
     # 사용자가 닉네임을 입력하고 들어왔을 때 동시 접속자에 안에서 파트너를 찾아 방 개설
     if request.method == "POST":
         form = request.POST
         nickname = form['nickname']
         deviceID = form['deviceID']
-        print(request)
         # Player 정보 확인
         if Player.objects.filter(deviceID=deviceID):
             player1 = Player.objects.get(deviceID=deviceID)
             player1.nick = nickname
             player1.is_active = True
+            player1.save()
         else:
             player1 = Player.objects.create(deviceID=deviceID, nick=nickname)
-        print(type(player1))
         # partner 찾을 때까지 return 하지 않고 기다리기
+        last_access = player1.last_access_time.minute
         while True:
             player1 = Player.objects.get(deviceID=deviceID)
-            print("in while")
+            current_time = datetime.now().minute
+            delta = current_time-last_access
+            print(delta)
+            if delta:
+                break
             if player1.have_partner:
-                game = MotionRecognition.objects.get(player2=player1)
-                game.title = game.title + nickname
-                game.save()
-                return HttpResponse(game.channel_number)
+                game = MotionRecognition.objects.filter(player2=player1).order_by('-created_time')
+                game_info["title"] = game[0].title
+                game_info["channel_number"] = game[0].channel_number
+                return HttpResponse(dumps(game_info), content_type='application/json')
             else:
                 # partner가 없는 기존의  player 정보 가져오기
                 player_query = Player.objects.filter(is_active=True, have_partner=False).exclude(deviceID=deviceID)
                 num_player = player_query.count()
-                print("num_player:", num_player)
                 # 기존의 player 안에서 partner가 될 대상 랜덤하게 고르기
                 if num_player > 0:
                     partner_index = randint(0, num_player - 1)
@@ -62,15 +70,18 @@ def find_partner(request):
                     player2 = Player.objects.get(pk=player2_pk)
                     player1.have_partner = True
                     player2.have_partner = True
-                    channel_number = randint(1, 100)
+                    channel_number = randint(1, 500)
                     player1.save()
                     player2.save()
-                    title = nickname + "&"
-                    MotionRecognition.objects.create(player1=player1, player2=player2, channel_number=channel_number, title=title)
-                    return HttpResponse(channel_number)
+                    title = str(nickname) + " & " + str(player2.nick)
+                    keyword_index = randint(0, len(KEYWORD) - 1)
+                    MotionRecognition.objects.create(player1=player1, player2=player2, channel_number=channel_number, title=title, keyword_index=keyword_index)
+                    game_info["title"] = title
+                    game_info["channel_number"] = channel_number
+                    return HttpResponse(dumps(game_info), content_type='application/json')
 
     # 더이상 접속하지 않고 게임을 나감
-    return HttpResponse('no')
+    return HttpResponse(dumps(game_info), content_type='application/json')
 
 
 def get_total_ready(game):
@@ -101,7 +112,8 @@ def get_two_ready(request):
     if request.method == "POST":
         form = request.POST
         deviceID = form['deviceID']
-        channel_number = form['channelNumber']
+        title = form['title']
+        channel_number = form['channel_number']
         if Player.objects.filter(deviceID=deviceID).exists():
             print("find player")
             player = Player.objects.get(deviceID=deviceID)
@@ -110,9 +122,9 @@ def get_two_ready(request):
             print("update ready")
             player.save()
             # 상대방도 ready를 했는지 확인
-            if MotionRecognition.objects.filter(channel_number=channel_number).exists():
+            if MotionRecognition.objects.filter(channel_number=channel_number, title=title).exists():
                 print("find game")
-                game = MotionRecognition.objects.get(channel_number=channel_number)
+                game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
                 total_ready = get_total_ready(game)
                 print(total_ready)
                 if total_ready == 2:
@@ -124,7 +136,7 @@ def get_two_ready(request):
                         reset_ready(game)
                         game.send_keyword = 0
                         game.save()
-                    return HttpResponse('keyword')
+                    return HttpResponse(KEYWORD[game.keyword_index])
                 else:
                     return HttpResponse('no')
             else:
@@ -143,7 +155,8 @@ def get_result(request):
         form = request.POST
         player = Player.objects.get(deviceID=form['deviceID'])
         channel_number = form['channel_number']
-        game = MotionRecognition.objects.get(channel_number=channel_number)  # channel number가 고유
+        title = form['title']
+        game = MotionRecognition.objects.get(channel_number=channel_number, title=title)  # channel number가 고유
         # round 모델 생성 or get
         round = Round.objects.get_or_create(game=game, round=form['round']) # 모델에 저장된 라운드보다 +1된 값, game 모델 라운드는 게임 종료 후 업데이트 된다.
         # json to dict
@@ -162,7 +175,9 @@ def get_result(request):
                 print("get score error: too much pose in one round")
                 return HttpResponse('no')
             else:
+                # round, keyword_index 갱신
                 game.round += 1
+                game.keyword_index = randint(0, len(KEYWORD))
                 game.save()
                 return HttpResponse(score)
         else:
@@ -247,7 +262,7 @@ def send_rank(request):
     rank = []
     if request.method == "GET":
         # ranking 정보 점수 내림차순 정렬
-        all_rank_query = MotionRecognition.objects.filter(round=7).order_by('score')
+        all_rank_query = MotionRecognition.objects.filter(round=7).order_by('-score')
         for rank_query in all_rank_query:
             rank_dict = {'title': rank_query.title, 'score': rank_query.score}
             rank.append(rank_dict)

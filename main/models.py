@@ -7,19 +7,22 @@ class Player(models.Model):
     is_active = models.BooleanField(default=True)
     have_partner = models.BooleanField(default=False)
     ready = models.IntegerField(default=0)
+    last_access_time = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.deviceID}, nick: {self.nick}"
+        return f"{self.deviceID}({self.nick})"
 
 
 class MotionRecognition(models.Model):
     title = models.CharField(max_length=20)
+    created_time = models.DateTimeField(auto_now_add=True)
     player1 = models.ForeignKey(Player, related_name='player1', on_delete=models.CASCADE)
     player2 = models.ForeignKey(Player, related_name='player2', on_delete=models.CASCADE)
     score = models.IntegerField(default=0)
     round = models.IntegerField(default=0)
     channel_number = models.IntegerField(default=0)
     send_keyword = models.IntegerField(default=0)
+    keyword_index = models.IntegerField(default=0)
 
     def __str__(self):
         return f"{self.round}: {self.title}"
