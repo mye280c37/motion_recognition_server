@@ -47,6 +47,8 @@ def find_partner(request):
             print("in while")
             if player1.have_partner:
                 game = MotionRecognition.objects.get(player2=player1)
+                game.title = game.title + nickname
+                game.save()
                 return HttpResponse(game.channel_number)
             else:
                 # partner가 없는 기존의  player 정보 가져오기
@@ -63,7 +65,8 @@ def find_partner(request):
                     channel_number = randint(1, 100)
                     player1.save()
                     player2.save()
-                    MotionRecognition.objects.create(player1=player1, player2=player2, channel_number=channel_number)
+                    title = nickname + "&"
+                    MotionRecognition.objects.create(player1=player1, player2=player2, channel_number=channel_number, title=title)
                     return HttpResponse(channel_number)
 
     # 더이상 접속하지 않고 게임을 나감
@@ -243,26 +246,27 @@ def send_rank(request):
     # when game over, get total_score
     rank = []
     if request.method == "GET":
-        rank = [
+        # ranking 정보 점수 내림차순 정렬
+        all_rank_query = MotionRecognition.objects.filter(round=7).order_by('score')
+        for rank_query in all_rank_query:
+            rank_dict = {'title': rank_query.title, 'score': rank_query.score}
+            rank.append(rank_dict)
+    return HttpResponse(dumps(rank), content_type='application/json')
+
+
+'''
+rank = [
             {
-                'player1': 'Tom',
-                'player2': 'Peter',
+                'title': 'Tom&Peter',
                 'score': 690,
             },
             {
-                'player1': 'Tom',
-                'player2': 'James',
+                'title': 'Tom&James',
                 'score': 500
             },
             {
-                'player1': 'Lily',
-                'player2': 'Anne',
+                'title': 'Lily&Anne',
                 'score': 440
             }
         ]
-    # ranking 정보 점수 내림차순 정렬
-    # all_rank_query = MotionRecognition.objects.filter(round=7).order_by('score')
-    # for rank_query in all_rank_query:
-    #     rank_dict = {'nickname1': rank_query.nick1, 'nickname2': rank_query.nick2, 'score': rank_query.score}
-    #     rank.append(rank_dict)
-    return HttpResponse(dumps(rank), content_type='application/json')
+'''

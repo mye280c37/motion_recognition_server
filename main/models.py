@@ -13,6 +13,7 @@ class Player(models.Model):
 
 
 class MotionRecognition(models.Model):
+    title = models.CharField(max_length=20)
     player1 = models.ForeignKey(Player, related_name='player1', on_delete=models.CASCADE)
     player2 = models.ForeignKey(Player, related_name='player2', on_delete=models.CASCADE)
     score = models.IntegerField(default=0)
@@ -21,7 +22,7 @@ class MotionRecognition(models.Model):
     send_keyword = models.IntegerField(default=0)
 
     def __str__(self):
-        return f"{self.round}: {self.player1}&{self.player2}"
+        return f"{self.round}: {self.title}"
 
 
 class Round(models.Model):
