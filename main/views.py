@@ -118,27 +118,27 @@ def get_two_ready(request):
             print("find player")
             player = Player.objects.get(deviceID=deviceID)
             # Player의 게임에 대한 ready update
-            player.ready += 1
+            player.ready = 1
             print("update ready")
             player.save()
             # 상대방도 ready를 했는지 확인
+            # 1. find game model
             if MotionRecognition.objects.filter(channel_number=channel_number, title=title).exists():
                 print("find game")
                 game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
-                total_ready = get_total_ready(game)
-                print(total_ready)
-                if total_ready == 2:
-                    game.send_keyword += 1
+                while get_total_ready(game) < 2:
+                    # get recent model and check player's ready until total ready is 2
+                    game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
+                    print(get_total_ready(game))
+                game.send_keyword += 1
+                game.save()
+                # 다음 라운드를 위해 ready reset
+                if game.send_keyword == 2:
+                    print("second send keyword")
+                    reset_ready(game)
+                    game.send_keyword = 0
                     game.save()
-                    # 다음 라운드를 위해 ready reset
-                    if game.send_keyword == 2:
-                        print("second send keyword")
-                        reset_ready(game)
-                        game.send_keyword = 0
-                        game.save()
-                    return HttpResponse(KEYWORD[game.keyword_index])
-                else:
-                    return HttpResponse('no')
+                return HttpResponse(KEYWORD[game.keyword_index])
             else:
                 print("there is no game")
                 return HttpResponse("no")
@@ -149,6 +149,7 @@ def get_two_ready(request):
 # 두 명한테 각각 오나?
 # 한 게임 종료에 대해 두 request가 오면 하나는 동작을 처리하고 하나는 결과만 전송해야 함
 # 좌표값은 두 명의 플레이어의 디바이스에서 각각 넘어옴 그래서 두 개 받아서 계산해서 넘겨줘야 함
+@method_decorator(csrf_exempt, name='dispatch')
 def get_result(request):
     # 앱으로부터 posenet 결과 값을 전송받아 비교 후 점수 전송 'keypoints' key의 array가 서버로 전송됨
     if request.method == 'POST':
@@ -205,16 +206,18 @@ result 양식
 
 # result part별로 point 모델 생성해서 pose에 foreignkey
 def save_point(pose, result):
-    for key, value in result:
+    i = 0
+    for value in result:
         x = value['x']
         y = value['y']
-        Point.objects.create(pose=pose, part=key, x=x, y=y)
+        Point.objects.create(pose=pose, part=i, x=x, y=y)
+        i+=1
 
 
 def relocate_points(result):
-    # 서버로 들어오 result를 nose 값을 고정해서 nose 기준으로 재배치
+    # 서버로 들어온 result를 nose 값을 고정해서 nose 기준으로 재배치
     dx = dy = 0
-    for key, value in result:
+    for value in result:
         if value['part'] != 'nose':
             value['x'] = value['x'] * 100 + dx
             value['y'] = value['y'] * 100 + dy
