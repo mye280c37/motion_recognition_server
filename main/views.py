@@ -5,7 +5,6 @@ from math import *
 
 from django.shortcuts import render
 from django.http import HttpResponse
-from django.db.models import Q
 from .models import *
 from .forms import *
 
@@ -51,9 +50,10 @@ def find_partner(request):
             player1 = Player.objects.get(deviceID=deviceID)
             current_time = datetime.now().minute
             delta = current_time-last_access
-            print(delta)
             if delta:
-                break
+                player1.is_active = False
+                player1.save()
+                return HttpResponse("no/timeout")
             if player1.have_partner:
                 game = MotionRecognition.objects.filter(player2=player1).order_by('-created_time')
                 game_info["title"] = game[0].title
@@ -110,6 +110,7 @@ def get_two_ready(request):
     # 파트너 두 명의 레디 버튼을 받으면 키워드를 전송
     #ToDo: CRSF Token
     if request.method == "POST":
+        request_time = datetime.now().minute
         form = request.POST
         deviceID = form['deviceID']
         title = form['title']
@@ -125,20 +126,38 @@ def get_two_ready(request):
             # 1. find game model
             if MotionRecognition.objects.filter(channel_number=channel_number, title=title).exists():
                 print("find game")
-                game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
-                while get_total_ready(game) < 2:
-                    # get recent model and check player's ready until total ready is 2
+                # game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
+                while True:
                     game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
-                    print(get_total_ready(game))
-                game.send_keyword += 1
-                game.save()
-                # 다음 라운드를 위해 ready reset
+                    if get_total_ready(game) == 2:
+                        print("total ready")
+                        keyword = KEYWORD[game.keyword_index]
+                        break
+                    now_time = datetime.now().minute
+                    if now_time - request_time:
+                        # game에 해당하는 모든 플레이어
+                        game.player1.have_partner = False
+                        game.player1.is_active = False
+                        game.player2.have_partner = False
+                        game.player2.is_active = False
+                        game.save()
+                        return HttpResponse("no/timeout")
+                if not game.send_keyword:
+                    game.send_keyword = 1
+                    game.save()
+                else:
+                    game.send_keyword = 2
+                    game.save()
+                # get recent model and check player's ready until total ready is 2
+                # print("total ready", get_total_ready(game))
+                game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
                 if game.send_keyword == 2:
                     print("second send keyword")
                     reset_ready(game)
                     game.send_keyword = 0
                     game.save()
-                return HttpResponse(KEYWORD[game.keyword_index])
+                return HttpResponse(keyword)
+                # 다음 라운드를 위해 ready reset
             else:
                 print("there is no game")
                 return HttpResponse("no")
@@ -151,6 +170,7 @@ def get_two_ready(request):
 # 좌표값은 두 명의 플레이어의 디바이스에서 각각 넘어옴 그래서 두 개 받아서 계산해서 넘겨줘야 함
 @method_decorator(csrf_exempt, name='dispatch')
 def get_result(request):
+    print("hi")
     # 앱으로부터 posenet 결과 값을 전송받아 비교 후 점수 전송 'keypoints' key의 array가 서버로 전송됨
     if request.method == 'POST':
         form = request.POST
@@ -158,33 +178,63 @@ def get_result(request):
         channel_number = form['channel_number']
         title = form['title']
         game = MotionRecognition.objects.get(channel_number=channel_number, title=title)  # channel number가 고유
-        # round 모델 생성 or get
-        round = Round.objects.get_or_create(game=game, round=form['round']) # 모델에 저장된 라운드보다 +1된 값, game 모델 라운드는 게임 종료 후 업데이트 된다.
+        # game_round 모델 생성 or get
+        print("round: ", form['round'])
+        r = int(form['round'])
+        if Round.objects.filter(game=game, game_round=r).exists():
+            game_round = Round.objects.get(game=game, game_round=r)  # 모델에 저장된 라운드보다 +1된 값, game 모델 라운드는 게임 종료 후 업데이트 된다.
+        else:
+            game_round = Round.objects.create(game=game, game_round=r)
+
+        print("game_round: ", game_round.game_round)
+        print(game_round.result_number)
+        print(type(game_round))
+        print("================================")
+        print(form['result'])
         # json to dict
         result = loads(form['result'])
         # result를 nose를 (50, 20)에 고정시켜 재정렬
         relocate_points(result)
         # player의 result 값 저장
-        # pose는 한 게임의 각 라운드 당 player 두 명 것만 존재해야함, (game, round, player)에 대해 고유
-        pose = PoseEstimation.objects.create(game=game, player=player, round=round)
+        # pose는 한 게임의 각 라운드 당 player 두 명 것만 존재해야함, (game, game_round, player)에 대해 고유
+        pose = PoseEstimation.objects.create(game=game, player=player, game_round=game_round)
+        print("================================")
+        print(game_round.result_number)
+        print(pose.game_round.id)
         save_point(pose, result)
-        round.result_number += 1
-        # round.result_number 가 2이면 점수 계산
-        if round.result_number == 2:
-            score = get_score(game, round)
-            if score == -1:
-                print("get score error: too much pose in one round")
-                return HttpResponse('no')
-            else:
-                # round, keyword_index 갱신
-                game.round += 1
-                game.keyword_index = randint(0, len(KEYWORD))
+        game_round.result_number += 1
+        game_round.save()
+        # game_round.result_number 가 2이면 점수 계산
+        request_time = datetime.now().minute
+        while True:
+            now_time = datetime.now().minute
+            if now_time - request_time:
+                print("time over")
+                # game에 해당하는 모든 플레이어
+                game.player1.have_partner = False
+                game.player1.is_active = False
+                game.player2.have_partner = False
+                game.player2.is_active = False
                 game.save()
-                return HttpResponse(score)
-        else:
-            print("we need more result")
-            return HttpResponse("no")
-
+                return HttpResponse("no/timeout")
+            game_round = Round.objects.get(game=game, game_round=r)
+            if game_round.result_number >= 2:
+                print("game_round.result_number")
+                score = get_score(game, game_round)
+                game_round.result_number += 1
+                game_round.save()
+                if score == -1:
+                    print("get score error: too much pose in one round")
+                    return HttpResponse('no')
+                else:
+                    # game_round, keyword_index 갱신
+                    if game_round.result_number > 2:
+                        game_round.result_number = 2
+                        game_round.save()
+                        game.game_round += 1
+                        game.keyword_index = randint(0, len(KEYWORD))
+                        game.save()
+                    return HttpResponse(score)
     return HttpResponse('no')
 
 
@@ -228,17 +278,21 @@ def relocate_points(result):
             value['y'] = 20
 
 
-def get_score(game, round):
-    pose = PoseEstimation.objects.filter(game=game, round=round)
+def get_score(game, game_round):
+    print("11111")
+    pose = PoseEstimation.objects.filter(game=game, game_round=game_round)
     if pose.count() == 2:
+        print("22222")
         result1 = Point.objects.filter(pose_id=pose[0].id).order_by('part')
         result2 = Point.objects.filter(pose_id=pose[1].id).order_by('part')
         # 두 결과의 각 점의 L2Distance 구해서 총 거리 합을 바탕으로 점수 배정
         distance = 0
         for i in range(0, 17):
             dx = result2[i].x - result1[i].x
-            dy = result2[i].y - result1[i].x
+            dy = result2[i].y - result1[i].y
             distance += sqrt(pow(dx, 2) + pow(dy, 2))
+
+        print("distance: ", distance)
 
         # distance 바탕으로 점수 산출
         if distance < 170:
@@ -265,7 +319,7 @@ def send_rank(request):
     rank = []
     if request.method == "GET":
         # ranking 정보 점수 내림차순 정렬
-        all_rank_query = MotionRecognition.objects.filter(round=7).order_by('-score')
+        all_rank_query = MotionRecognition.objects.filter(game_round=7).order_by('-score')
         for rank_query in all_rank_query:
             rank_dict = {'title': rank_query.title, 'score': rank_query.score}
             rank.append(rank_dict)

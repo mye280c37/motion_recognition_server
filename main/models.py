@@ -19,31 +19,31 @@ class MotionRecognition(models.Model):
     player1 = models.ForeignKey(Player, related_name='player1', on_delete=models.CASCADE)
     player2 = models.ForeignKey(Player, related_name='player2', on_delete=models.CASCADE)
     score = models.IntegerField(default=0)
-    round = models.IntegerField(default=0)
+    game_round = models.IntegerField(default=0)
     channel_number = models.IntegerField(default=0)
     send_keyword = models.IntegerField(default=0)
     keyword_index = models.IntegerField(default=0)
 
     def __str__(self):
-        return f"{self.round}: {self.title}"
+        return f"{self.game_round}: {self.title}"
 
 
 class Round(models.Model):
     game = models.ForeignKey(MotionRecognition, related_name="game", on_delete=models.CASCADE)
-    round = models.IntegerField()
+    game_round = models.IntegerField(default=0)
     result_number = models.IntegerField(default=0)
 
     def __str__(self):
-        return f"{self.game_id}: round{self.round}"
+        return f"{self.game}: round{self.game_round}"
 
 
 class PoseEstimation(models.Model):
     player = models.ForeignKey(Player, on_delete=models.CASCADE)
     game = models.ForeignKey(MotionRecognition, on_delete=models.CASCADE)
-    round = models.ForeignKey(Round, on_delete=models.CASCADE)
+    game_round = models.ForeignKey(Round, on_delete=models.CASCADE)
 
     def __str__(self):
-        return f"game{self.game_id}, round{self.round_id}: player{self.player_id}"
+        return f"game{self.game}, round{self.game_round}: player{self.player}"
 
 
 class Point(models.Model):
@@ -53,5 +53,5 @@ class Point(models.Model):
     y = models.IntegerField()
 
     def __str__(self):
-        return f"point for pose_id {self.pose_id}"
+        return f"point for pose_id {self.pose}"
 
