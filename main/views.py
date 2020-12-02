@@ -6,7 +6,6 @@ from math import *
 from django.shortcuts import render
 from django.http import HttpResponse
 from .models import *
-from .forms import *
 
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
@@ -29,6 +28,7 @@ def name(request):
 
 @method_decorator(csrf_exempt, name='dispatch')
 def find_partner(request):
+    request_time = datetime.now()
     game_info = {"title": "no",
                  "channel_number": 0}
     # 사용자가 닉네임을 입력하고 들어왔을 때 동시 접속자에 안에서 파트너를 찾아 방 개설
@@ -41,18 +41,22 @@ def find_partner(request):
             player1 = Player.objects.get(deviceID=deviceID)
             player1.nick = nickname
             player1.is_active = True
+            player1.have_partner = False
+            player1.ready = False
+            player1.result = False
             player1.save()
         else:
             player1 = Player.objects.create(deviceID=deviceID, nick=nickname)
         # partner 찾을 때까지 return 하지 않고 기다리기
-        last_access = player1.last_access_time.minute
+        print(datetime.now() - player1.last_access_time)
         while True:
             player1 = Player.objects.get(deviceID=deviceID)
-            current_time = datetime.now().minute
-            delta = current_time-last_access
-            if delta:
+            current_time = datetime.now()
+            delta = current_time-request_time
+            if delta.total_seconds() > 59:
                 player1.is_active = False
                 player1.save()
+                print("there is no partner")
                 return HttpResponse("no/timeout")
             if player1.have_partner:
                 game = MotionRecognition.objects.filter(player2=player1).order_by('-created_time')
@@ -84,84 +88,56 @@ def find_partner(request):
     return HttpResponse(dumps(game_info), content_type='application/json')
 
 
-def get_total_ready(game):
-    ready1 = game.player1.ready
-    ready2 = game.player2.ready
-    total_ready = 0
-    if ready1 >= 1:
-        total_ready += 1
-    if ready2 >= 1:
-        total_ready += 1
-
-    return total_ready
-
-
-def reset_ready(game):
-    player1 = game.player1
-    player2 = game.player2
-    player1.ready = 0
-    player1.save()
-    player2.ready = 0
-    player2.save()
-
-
 @method_decorator(csrf_exempt, name='dispatch')
 def get_two_ready(request):
     # 파트너 두 명의 레디 버튼을 받으면 키워드를 전송
-    #ToDo: CRSF Token
     if request.method == "POST":
-        request_time = datetime.now().minute
+        request_time = datetime.now()
         form = request.POST
         deviceID = form['deviceID']
         title = form['title']
         channel_number = form['channel_number']
-        if Player.objects.filter(deviceID=deviceID).exists():
-            print("find player")
-            player = Player.objects.get(deviceID=deviceID)
-            # Player의 게임에 대한 ready update
-            player.ready = 1
-            print("update ready")
-            player.save()
-            # 상대방도 ready를 했는지 확인
-            # 1. find game model
-            if MotionRecognition.objects.filter(channel_number=channel_number, title=title).exists():
-                print("find game")
-                # game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
-                while True:
-                    game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
-                    if get_total_ready(game) == 2:
-                        print("total ready")
-                        keyword = KEYWORD[game.keyword_index]
-                        break
-                    now_time = datetime.now().minute
-                    if now_time - request_time:
-                        # game에 해당하는 모든 플레이어
-                        game.player1.have_partner = False
-                        game.player1.is_active = False
-                        game.player2.have_partner = False
-                        game.player2.is_active = False
-                        game.save()
-                        return HttpResponse("no/timeout")
-                if not game.send_keyword:
-                    game.send_keyword = 1
-                    game.save()
-                else:
-                    game.send_keyword = 2
-                    game.save()
-                # get recent model and check player's ready until total ready is 2
-                # print("total ready", get_total_ready(game))
+        # 1. update player's ready
+        player = Player.objects.get(deviceID=deviceID)
+        player.ready = True
+        #   * reset player's result
+        player.result = False
+        player.save()
+        # 2. find game model
+        if MotionRecognition.objects.filter(channel_number=channel_number, title=title).count() == 1:
+            game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
+            player1_pk = game.player1.pk
+            player2_pk = game.player2.pk
+            print("find game")
+            while True:
+                current_time = datetime.now()
+                delta = current_time-request_time
                 game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
-                if game.send_keyword == 2:
-                    print("second send keyword")
-                    reset_ready(game)
-                    game.send_keyword = 0
-                    game.save()
-                return HttpResponse(keyword)
-                # 다음 라운드를 위해 ready reset
-            else:
-                print("there is no game")
-                return HttpResponse("no")
-
+                player1 = Player.objects.get(pk=player1_pk)
+                player2 = Player.objects.get(pk=player2_pk)
+                if player1.ready and player2.ready:
+                    break
+                # if there is no another ready during 1 minute
+                elif delta.total_seconds() > 59:
+                    # reset all game player's state
+                    all_player = [player1, player2]
+                    for each_player in all_player:
+                        each_player.have_partner = False
+                        each_player.is_active = False
+                        each_player.ready = False
+                        each_player.result = False
+                        each_player.save()
+                    print("there is no more ready")
+                    return HttpResponse("no/timeout")
+            # when both get ready
+            keyword = KEYWORD[game.keyword_index]
+            return HttpResponse(keyword)
+        elif MotionRecognition.objects.filter(channel_number=channel_number, title=title).count() == 0:
+            print("there is no game")
+            return HttpResponse('no')
+        else:
+            print("there is too much game model")
+            return HttpResponse('no')
     return HttpResponse('no')
 
 
@@ -170,71 +146,79 @@ def get_two_ready(request):
 # 좌표값은 두 명의 플레이어의 디바이스에서 각각 넘어옴 그래서 두 개 받아서 계산해서 넘겨줘야 함
 @method_decorator(csrf_exempt, name='dispatch')
 def get_result(request):
-    print("hi")
     # 앱으로부터 posenet 결과 값을 전송받아 비교 후 점수 전송 'keypoints' key의 array가 서버로 전송됨
     if request.method == 'POST':
+        request_time = datetime.now()
         form = request.POST
+        # get player model
         player = Player.objects.get(deviceID=form['deviceID'])
+        # reset player's ready
+        player.ready = False
+        player.save()
+        # find game model
         channel_number = form['channel_number']
         title = form['title']
-        game = MotionRecognition.objects.get(channel_number=channel_number, title=title)  # channel number가 고유
-        # game_round 모델 생성 or get
-        print("round: ", form['round'])
-        r = int(form['round'])
-        if Round.objects.filter(game=game, game_round=r).exists():
-            game_round = Round.objects.get(game=game, game_round=r)  # 모델에 저장된 라운드보다 +1된 값, game 모델 라운드는 게임 종료 후 업데이트 된다.
-        else:
-            game_round = Round.objects.create(game=game, game_round=r)
-
-        print("game_round: ", game_round.game_round)
-        print(game_round.result_number)
-        print(type(game_round))
-        print("================================")
-        print(form['result'])
-        # json to dict
-        result = loads(form['result'])
-        # result를 nose를 (50, 20)에 고정시켜 재정렬
-        relocate_points(result)
-        # player의 result 값 저장
-        # pose는 한 게임의 각 라운드 당 player 두 명 것만 존재해야함, (game, game_round, player)에 대해 고유
-        pose = PoseEstimation.objects.create(game=game, player=player, game_round=game_round)
-        print("================================")
-        print(game_round.result_number)
-        print(pose.game_round.id)
-        save_point(pose, result)
-        game_round.result_number += 1
-        game_round.save()
-        # game_round.result_number 가 2이면 점수 계산
-        request_time = datetime.now().minute
-        while True:
-            now_time = datetime.now().minute
-            if now_time - request_time:
-                print("time over")
-                # game에 해당하는 모든 플레이어
-                game.player1.have_partner = False
-                game.player1.is_active = False
-                game.player2.have_partner = False
-                game.player2.is_active = False
+        if MotionRecognition.objects.filter(channel_number=channel_number, title=title).count():
+            game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
+            # 1. update round
+            game.game_round = form['round']
+            game.save()
+            # 2. save result in point models
+            #   1) json to dict
+            result = loads(form['result'])
+            #   2) result를 nose를 (50, 20)에 고정시켜 재정렬
+            relocate_points(result)
+            #   4) save relocated scores in point models
+            is_save = save_point(game, player, result)
+            if is_save:
+                #   5) change player's result flag
+                player.result = True
+                player.save()
+            else:
+                print("fail to save points")
+                return HttpResponse('no')
+            # wait until all player's result becomes true
+            game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
+            player1_pk = game.player1.pk
+            player2_pk = game.player2.pk
+            while True:
+                current_time = datetime.now()
+                delta = current_time - request_time
+                game = MotionRecognition.objects.get(channel_number=channel_number, title=title)
+                player1 = Player.objects.get(pk=player1_pk)
+                player2 = Player.objects.get(pk=player2_pk)
+                if player1.result and player2.result:
+                    break
+                    # if there is no another result during 1 minute
+                elif delta.total_seconds() > 59:
+                    # reset all game player's state
+                    player1 = game.player1
+                    player2 = game.player2
+                    all_player = [player1, player2]
+                    for each_player in all_player:
+                        each_player.have_partner = False
+                        each_player.is_active = False
+                        each_player.ready = False
+                        each_player.result = False
+                        each_player.save()
+                    print("there is no more result")
+                    return HttpResponse("no/timeout")
+            # when both send result``````````````````````````````````````````````````````````````````````````````
+            # 3. get score and save in game model
+            score = get_score(game)
+            #   score must be saved only one time and also keyword_index
+            if game.player1.pk == player.pk:
+                keyword_index = randint(0, len(KEYWORD) - 1)
+                game.keyword_index = keyword_index
+                game.score += score
                 game.save()
-                return HttpResponse("no/timeout")
-            game_round = Round.objects.get(game=game, game_round=r)
-            if game_round.result_number >= 2:
-                print("game_round.result_number")
-                score = get_score(game, game_round)
-                game_round.result_number += 1
-                game_round.save()
-                if score == -1:
-                    print("get score error: too much pose in one round")
-                    return HttpResponse('no')
-                else:
-                    # game_round, keyword_index 갱신
-                    if game_round.result_number > 2:
-                        game_round.result_number = 2
-                        game_round.save()
-                        game.game_round += 1
-                        game.keyword_index = randint(0, len(KEYWORD))
-                        game.save()
-                    return HttpResponse(score)
+            return HttpResponse(score)
+        elif MotionRecognition.objects.filter(channel_number=channel_number, title=title).count() == 0:
+            print("there is no game")
+            return HttpResponse('no')
+        else:
+            print("there is too much game model")
+            return HttpResponse('no')
     return HttpResponse('no')
 
 
@@ -254,14 +238,22 @@ result 양식
 '''
 
 
-# result part별로 point 모델 생성해서 pose에 foreignkey
-def save_point(pose, result):
+# result part별로 point 모델 생성해서 game, player에 foreignkey
+def save_point(game, player, result):
     i = 0
+    # create or get Point model and save points
     for value in result:
-        x = value['x']
-        y = value['y']
-        Point.objects.create(pose=pose, part=i, x=x, y=y)
-        i+=1
+        if Point.objects.filter(game=game, player=player, part=i).count() == 1:
+            point = Point.objects.get(game=game, player=player, part=i)
+        elif Point.objects.filter(game=game, player=player, part=i).count() == 0:
+            point = Point.objects.create(game=game, player=player, part=i)
+        else:
+            return False
+        point.x = value['x']
+        point.y = value['y']
+        point.save()
+        i += 1
+    return True
 
 
 def relocate_points(result):
@@ -278,14 +270,16 @@ def relocate_points(result):
             value['y'] = 20
 
 
-def get_score(game, game_round):
+def get_score(game):
     print("11111")
-    pose = PoseEstimation.objects.filter(game=game, game_round=game_round)
-    if pose.count() == 2:
-        print("22222")
-        result1 = Point.objects.filter(pose_id=pose[0].id).order_by('part')
-        result2 = Point.objects.filter(pose_id=pose[1].id).order_by('part')
-        # 두 결과의 각 점의 L2Distance 구해서 총 거리 합을 바탕으로 점수 배정
+    player1 = game.player1
+    player2 = game.player2
+    print("22222")
+    # get each player's all points query
+    result1 = Point.objects.filter(game=game, player=player1).order_by('part')
+    result2 = Point.objects.filter(game=game, player=player2).order_by('part')
+    if result1.count() and result2.count():
+        # get L2Distance of each points of two players and add to total distance
         distance = 0
         for i in range(0, 17):
             dx = result2[i].x - result1[i].x
@@ -295,17 +289,17 @@ def get_score(game, game_round):
         print("distance: ", distance)
 
         # distance 바탕으로 점수 산출
-        if distance < 170:
+        if distance < 70:
             score = 100
-        elif distance < 340:
+        elif distance < 140:
             score = 90
-        elif distance < 510:
+        elif distance < 280:
             score = 80
-        elif distance < 680:
+        elif distance < 560:
             score = 70
-        elif distance < 850:
+        elif distance < 1000:
             score = 60
-        elif distance < 1020:
+        elif distance < 1700:
             score = 50
         else:
             score = 0
