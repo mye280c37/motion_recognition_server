@@ -48,12 +48,11 @@ def find_partner(request):
         else:
             player1 = Player.objects.create(deviceID=deviceID, nick=nickname)
         # partner 찾을 때까지 return 하지 않고 기다리기
-        print(datetime.now() - player1.last_access_time)
         while True:
             player1 = Player.objects.get(deviceID=deviceID)
             current_time = datetime.now()
             delta = current_time-request_time
-            if delta.total_seconds() > 59:
+            if delta.total_seconds() > 30:
                 player1.is_active = False
                 player1.save()
                 print("there is no partner")
@@ -79,7 +78,7 @@ def find_partner(request):
                     player2.save()
                     title = str(nickname) + " & " + str(player2.nick)
                     keyword_index = randint(0, len(KEYWORD) - 1)
-                    MotionRecognition.objects.create(player1=player1, player2=player2, channel_number=channel_number, title=title, keyword_index=keyword_index)
+                    MotionRecognition.objects.create(player1=player1, player2=player2, channel_number=channel_number, title=title, keyword_index=keyword_index, keyword_history=str(keyword_index))
                     game_info["title"] = title
                     game_info["channel_number"] = channel_number
                     return HttpResponse(dumps(game_info), content_type='application/json')
@@ -118,7 +117,7 @@ def get_two_ready(request):
                 if player1.ready and player2.ready:
                     break
                 # if there is no another ready during 1 minute
-                elif delta.total_seconds() > 59:
+                elif delta.total_seconds() > 30:
                     # reset all game player's state
                     all_player = [player1, player2]
                     for each_player in all_player:
@@ -190,7 +189,7 @@ def get_result(request):
                 if player1.result and player2.result:
                     break
                     # if there is no another result during 1 minute
-                elif delta.total_seconds() > 59:
+                elif delta.total_seconds() > 30:
                     # reset all game player's state
                     player1 = game.player1
                     player2 = game.player2
@@ -209,7 +208,13 @@ def get_result(request):
             #   score must be saved only one time and also keyword_index
             if game.player1.pk == player.pk:
                 keyword_index = randint(0, len(KEYWORD) - 1)
+                keyword_history_list = game.keyword_history.split()
+                keyword_history_list = list(map(int, keyword_history_list))
+                while keyword_index in keyword_history_list:
+                    keyword_index = randint(0, len(KEYWORD) - 1)
                 game.keyword_index = keyword_index
+                game.keyword_history += " "
+                game.keyword_history += str(keyword_index)
                 game.score += score
                 game.save()
             return HttpResponse(score)
@@ -289,18 +294,22 @@ def get_score(game):
         print("distance: ", distance)
 
         # distance 바탕으로 점수 산출
-        if distance < 70:
+        if distance < 50:
             score = 100
-        elif distance < 140:
+        elif distance < 100:
             score = 90
-        elif distance < 280:
+        elif distance < 200:
             score = 80
-        elif distance < 560:
+        elif distance < 350:
             score = 70
-        elif distance < 1000:
+        elif distance < 500:
             score = 60
-        elif distance < 1700:
+        elif distance < 650:
             score = 50
+        elif distance < 800:
+            score = 40
+        elif distance < 950:
+            score = 30
         else:
             score = 0
         return score

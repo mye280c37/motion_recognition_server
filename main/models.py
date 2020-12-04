@@ -23,6 +23,7 @@ class MotionRecognition(models.Model):
     game_round = models.IntegerField(default=0)
     channel_number = models.IntegerField(default=0)
     keyword_index = models.IntegerField(default=0)
+    keyword_history = models.CharField(max_length=20)
 
     def __str__(self):
         return f"{self.game_round}: {self.title}"
